@@ -18,10 +18,25 @@
 #define KEY_QUIT1 'q'
 #define KEY_QUIT2 'Q'
 
+#define OBSTACLE_HEIGHT_MAX 0.2
+#define OBSTACLE_SPEED 0.0125
+#define OBSTACLE_MAX_ARRIVAL 100
+
+
 #define FPS 30
 
 static char game_is_running = 1;
 static int step_count = 0;
+static int next_obstacle = 0;
+
+struct obstacle {
+    float x, y, height;
+    float speed;
+    int row1, row2, col;
+    struct obstacle* next;
+};
+
+static struct obstacle *obstacle_head = NULL;
 
 static struct {
     float x, y;
@@ -64,6 +79,7 @@ static void teardown()
 {
     (void)free(_ground_texture);
     (void)endwin();
+    printf("Final score: %d\n", step_count);
 }
 
 // convert x coordinate to column
@@ -91,6 +107,46 @@ static void xy2cr(float x, float y, int *col, int *row)
     y2r(y, row);
 }
 
+// schedule the arrival time of the next obstacle
+static void obstacle_schedule()
+{
+    next_obstacle = step_count + drand48() * OBSTACLE_MAX_ARRIVAL;
+}
+
+// add an obstacle to the queue
+static void obstacle_push()
+{
+    struct obstacle* ob = malloc(sizeof(struct obstacle));
+    if(ob == NULL) {
+        perror("malloc()");
+        return;
+    }
+    ob->height = drand48() * OBSTACLE_HEIGHT_MAX;
+    ob->x = 1;
+    ob->y = GROUND_PLANE;
+    ob->speed = OBSTACLE_SPEED;
+    ob->next = NULL;
+
+    if(obstacle_head == NULL) {
+        obstacle_head = ob;
+    }
+    else {
+        struct obstacle* cur = obstacle_head;
+        while(cur->next) {
+            cur = cur->next;
+        }
+        cur->next = ob;
+    }
+}
+
+// remove obstacle from top of queue
+static void obstacle_pop()
+{
+    struct obstacle* next = obstacle_head->next;
+    (void)free(obstacle_head);
+    obstacle_head = next;
+}
+
 static void clear_player()
 {
     int player_col, player_row;
@@ -101,6 +157,18 @@ static void clear_player()
         return;
     }
     (void)clrtobot();
+}
+
+static void draw_obstacles()
+{
+    struct obstacle *ob = obstacle_head;
+    while(ob) {
+        int i;
+        for(i = ob->row2; i <= ob->row1; i++) {
+            mvaddch(i, ob->col, '#');
+        }
+        ob = ob->next;
+    }
 }
 
 static void draw_player()
@@ -156,6 +224,7 @@ static void process_input()
 
 static void update()
 {
+    struct obstacle* ob;
     step_count++;
 
     // compute the player jump amount
@@ -171,6 +240,21 @@ static void update()
     // compute the position of the player in row/col space
     xy2cr(player.x, player.y + player.jump,
           &player.col, &player.row);
+
+    // update and compute positions of obstacles in row/col space
+    ob = obstacle_head;
+    while(ob) {
+        ob->x -= ob->speed;
+        xy2cr(ob->x, ob->y, &ob->col, &ob->row1);
+        y2r(ob->y + ob->height, &ob->row2);
+        ob = ob->next;
+    }
+
+    // add a new obstacle if it is time
+    if(next_obstacle <= step_count) {
+        obstacle_push();
+        obstacle_schedule();
+    }
 }
 
 static void draw_score()
@@ -183,8 +267,10 @@ static void draw_score()
 
 static void draw()
 {
-    clear_player();
+    clear();
+    //clear_player();
     draw_ground();
+    draw_obstacles();
     draw_player();
     draw_score();
 }
@@ -193,6 +279,7 @@ static void initialize()
 {
     player.x = 0.1;
     player.y = GROUND_PLANE;
+    obstacle_schedule();
 }
 
 int main()
