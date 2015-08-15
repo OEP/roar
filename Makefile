@@ -1,2 +1,2 @@
-LDFLAGS = -lncurses
+LDLIBS = -lncurses -lm
 all: roar

@@ -1,6 +1,7 @@
 #include <curses.h>
 #include <locale.h>
 #include <math.h>
+#include <signal.h>
 #include <stdlib.h>
 #include <sys/time.h>
 #include <unistd.h>
@@ -22,13 +23,14 @@
 #define OBSTACLE_SPEED 0.0125
 #define OBSTACLE_MAX_ARRIVAL 100
 
-
 #define FPS 30
 
+// various game data
 static char game_is_running = 1;
 static int step_count = 0;
 static int next_obstacle = 0;
 
+// obstacle structure
 struct obstacle {
     float x, y, height;
     float speed;
@@ -36,8 +38,10 @@ struct obstacle {
     struct obstacle* next;
 };
 
+// pointer to head of obstacle queue
 static struct obstacle *obstacle_head = NULL;
 
+// player-related data
 static struct {
     float x, y;
     int row, col;
@@ -147,18 +151,7 @@ static void obstacle_pop()
     obstacle_head = next;
 }
 
-static void clear_player()
-{
-    int player_col, player_row;
-    xy2cr(player.x, player.y + player.jump,
-          &player_col, &player_row);
-    if(move(0, player.x) == ERR) {
-        fprintf(stderr, "clear_player(): could not move()\n");
-        return;
-    }
-    (void)clrtobot();
-}
-
+// draw all the obstacles
 static void draw_obstacles()
 {
     struct obstacle *ob = obstacle_head;
@@ -171,11 +164,13 @@ static void draw_obstacles()
     }
 }
 
+// draw the player
 static void draw_player()
 {
     mvaddch(player.row, player.col, 'P');
 }
 
+// draw the ground plane and texture
 static void draw_ground()
 {
     int ground_row;
@@ -201,6 +196,7 @@ static void draw_ground()
     }
 }
 
+// handle player input
 static void process_input()
 {
     int ch;
@@ -222,6 +218,7 @@ static void process_input()
     }
 }
 
+// game update logic
 static void update()
 {
     struct obstacle* ob;
@@ -250,6 +247,13 @@ static void update()
         ob = ob->next;
     }
 
+    // pop off the obstacles which have gone off screen
+    ob = obstacle_head;
+    while(ob && ob->x < 0) {
+        ob = ob->next;
+        obstacle_pop();
+    }
+
     // add a new obstacle if it is time
     if(next_obstacle <= step_count) {
         obstacle_push();
@@ -257,6 +261,7 @@ static void update()
     }
 }
 
+// draw the score counter
 static void draw_score()
 {
     char buf[256];
@@ -265,16 +270,17 @@ static void draw_score()
     addstr(buf);
 }
 
+// draw all the game objects
 static void draw()
 {
     clear();
-    //clear_player();
     draw_ground();
     draw_obstacles();
     draw_player();
     draw_score();
 }
 
+// initial game setup
 static void initialize()
 {
     player.x = 0.1;
@@ -282,12 +288,25 @@ static void initialize()
     obstacle_schedule();
 }
 
+// signal handler to terminate game normally
+void handle_signal(int signum)
+{
+    game_is_running = 0;
+}
+
 int main()
 {
+    // sleep this amount in between frames
     float dt = 1.0 / FPS;
 
+    // signal handler which terminates the game normally
+    struct sigaction action;
+    action.sa_handler = &handle_signal;
+
+    // curses recommends doing this to avoid undefined behavior
     setlocale(LC_ALL, "");
 
+    // set up the terminal
     initscr();
     cbreak();
     noecho();
@@ -296,8 +315,11 @@ int main()
     keypad(stdscr, TRUE);
     nodelay(stdscr, TRUE);
 
+    // register various handlers
     atexit(teardown);
+    sigaction(SIGINT, &action, NULL);
 
+    // main game loop
     initialize();
     while(game_is_running) {
         process_input();
@@ -306,5 +328,5 @@ int main()
         draw();
     }
 
-    return 0;
+    exit(EXIT_SUCCESS);
 }
